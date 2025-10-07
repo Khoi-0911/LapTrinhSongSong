@@ -4,9 +4,12 @@
 
 using namespace std;
 
-// Tìm vị trí xuất hiện đầu tiên của 'target' trong mảng a (không sắp xếp).
-// Dùng critical (không dùng reduction(min:))
-int parallel_find_first(const int a[], int n, int target) {
+int find_first(int a[], int n, int target) {
+    // Tim vi tri dau tien xuat hien target trong mang:
+        // a[]: Mang dau vao
+        // n: So phan tu trong mang
+        // target: Gia tri cua phan tu can tim
+
     int idx = -1;
 
     #pragma omp parallel for
@@ -23,9 +26,11 @@ int parallel_find_first(const int a[], int n, int target) {
     return idx;
 }
 
-// Selection Sort: song song hóa bước tìm min trong đoạn [i+1 .. n-1]
-// Mỗi vòng i tạo một vùng song song để tìm min (đơn giản, phù hợp người mới).
-void selection_sort_omp(int a[], int n) {
+void sort(int a[], int n) {
+    // Sap xep mang theo gia tri tu be den lon:
+        // a[]: Mang dau vao can sap xep
+        // n: So luong phan tu trong mang
+        
     if (n <= 1) return;
 
     for (int i = 0; i < n - 1; ++i) {
@@ -45,8 +50,6 @@ void selection_sort_omp(int a[], int n) {
                     localMinIdx = j;
                 }
             }
-
-            // Gộp kết quả các luồng bằng critical
             #pragma omp critical
             {
                 if (localMinVal < minVal) {
@@ -54,10 +57,10 @@ void selection_sort_omp(int a[], int n) {
                     minIdx = localMinIdx;
                 }
             }
-        } // kết thúc vùng song song của vòng i
+        }
 
         if (minIdx != i) {
-            // Không dùng std::swap và cũng không tự tạo hàm swap
+            // Doi cho phan tu nho nhat vao vi tri dang xet
             int tmp = a[i];
             a[i] = a[minIdx];
             a[minIdx] = tmp;
@@ -66,21 +69,17 @@ void selection_sort_omp(int a[], int n) {
 }
 
 int main() {
-    // Demo: mảng số nguyên int a[]
-    int a[] = {5, 2, 7, 2, 9, 1, 4};
-    int n = static_cast<int>(sizeof(a) / sizeof(a[0]));
+    int a[] = {5, 2, 7, 2, 9, 1, 4, 6};
+    int n = sizeof(a) / sizeof(a[0]);
     int target = 2;
 
-    // Tìm kiếm phần tử
-    int pos = parallel_find_first(a, n, target);
+    int pos = find_first(a, n, target);
     cout << "Vi tri dau tien cua " << target << " trong mang: " << pos << "\n";
 
-    // Sắp xếp lựa chọn (selection sort) song song ở bước tìm min
-    selection_sort_omp(a, n);
+    sort(a, n);
 
     cout << "Mang sau khi sap xep: ";
     for (int i = 0; i < n; ++i) cout << a[i] << ' ';
-    cout << "\n";
 
     return 0;
 }
