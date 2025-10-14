@@ -71,10 +71,10 @@ void sort(int a[], int n) {
 int main() {
     int a[] = {5, 2, 7, 2, 9, 1, 4, 6};
     int n = sizeof(a) / sizeof(a[0]);
-    int target = 2;
+    int x = 2;
 
-    int pos = find_first(a, n, target);
-    cout << "Vi tri dau tien cua " << target << " trong mang: " << pos << "\n";
+    int pos = find_first(a, n, x);
+    cout << "Vi tri dau tien cua " << x << " trong mang: " << pos << "\n";
 
     sort(a, n);
 
