@@ -1,10 +1,10 @@
 #include <iostream>
 #include <vector>
 #include <omp.h>
-#include <iomanip> // Để sử dụng setprecision (nếu cần, nhưng giờ dùng chrono)
 #include <random>  // Để tạo đầu vào ngẫu nhiên
 #include <limits.h> // Để sử dụng INT_MAX
 #include <chrono>  // Để tính thời gian bằng chrono
+#include <stdexcept> // Để throw exception nếu input invalid
 
 #define INF INT_MAX
 
@@ -20,7 +20,7 @@ void floydWarshall(const vector<vector<int>>& graph, vector<vector<int>>& dist) 
         for (int i = 0; i < V; ++i) {
             for (int j = 0; j < V; ++j) {
                 if (dist[i][k] != INF && dist[k][j] != INF && 
-                    (long long)dist[i][k] + dist[k][j] < dist[i][j]) { // Sử dụng long long để tránh overflow
+                    (long long)dist[i][k] + dist[k][j] < dist[i][j]) {
                     dist[i][j] = dist[i][k] + dist[k][j];
                 }
             }
@@ -28,18 +28,50 @@ void floydWarshall(const vector<vector<int>>& graph, vector<vector<int>>& dist) 
     }
 }
 
-// Function to implement the Floyd-Warshall algorithm (song song với OpenMP)
-void parallel_floydWarshall(const vector<vector<int>>& graph, vector<vector<int>>& dist) {
+// Function to implement the Floyd-Warshall algorithm cach 1 (song song với OpenMP)
+void parallel_floydWarshall_1(const vector<vector<int>>& graph, vector<vector<int>>& dist) {
     int V = graph.size();
     dist = graph; // Copy graph vào dist
 
     // Update the solution matrix by considering all vertices
     for (int k = 0; k < V; ++k) {
+        // Snapshot hàng k và cột k để tránh đọc/ghi chồng chéo trong cùng bước k
+        vector<int> row_k(V);
+        vector<int> col_k(V);
+        for (int j = 0; j < V; ++j) row_k[j] = dist[k][j];
+        for (int i = 0; i < V; ++i) col_k[i] = dist[i][k];
+
         #pragma omp parallel for
+        for (int i = 0; i < V; ++i) {
+            // đọc col_k[i] là giá trị dist[i][k] sau bước k-1
+            int dik = col_k[i];
+            if (dik == INF) continue; // Không có đường i -> k thì bỏ qua cả hàng
+
+            for (int j = 0; j < V; ++j) {
+                int dkj = row_k[j];     // dist[k][j] sau bước k-1
+                if (dkj == INF) continue;
+
+                long long through_k = (long long)dik + dkj;
+                if (through_k < dist[i][j]) {
+                    dist[i][j] = (int)through_k;
+                }
+            }
+        }
+    }
+}
+
+// Function to implement the Floyd-Warshall algorithm cach 2 (song song với OpenMP, tối ưu bằng collapse(2))
+void parallel_floydWarshall_2(const vector<vector<int>>& graph, vector<vector<int>>& dist) {
+    int V = graph.size();
+    dist = graph; // Copy graph vào dist
+
+    // Update the solution matrix by considering all vertices
+    for (int k = 0; k < V; ++k) {
+        #pragma omp parallel for collapse(2)
         for (int i = 0; i < V; ++i) {
             for (int j = 0; j < V; ++j) {
                 if (dist[i][k] != INF && dist[k][j] != INF && 
-                    (long long)dist[i][k] + dist[k][j] < dist[i][j]) { // Sử dụng long long để tránh overflow
+                    (long long)dist[i][k] + dist[k][j] < dist[i][j]) {
                     dist[i][j] = dist[i][k] + dist[k][j];
                 }
             }
@@ -50,8 +82,11 @@ void parallel_floydWarshall(const vector<vector<int>>& graph, vector<vector<int>
 int main() {
     // Người dùng nhập kích thước ma trận V
     int V;
-    cout << "Nhap kich thuoc ma tran V (vi du: 1000): ";
+    cout << "Nhap kich thuoc ma tran V (vi du: 1000, phai > 0): ";
     cin >> V;
+    if (V <= 0) {
+        throw invalid_argument("V phai lon hon 0!");
+    }
 
     // Tạo đầu vào ngẫu nhiên: Ma trận VxV, đồ thị sparse (xác suất có cạnh ~0.1), trọng số ngẫu nhiên từ 1 đến 100
     vector<vector<int>> graph(V, vector<int>(V, INF));
@@ -73,7 +108,6 @@ int main() {
     }
 
     // Chạy Floyd-Warshall tuần tự
-    cout << "[INFO] Dang chay Floyd-Warshall tuan tu..." << endl;
     vector<vector<int>> dist_seq;
     auto start_seq = chrono::high_resolution_clock::now();
     floydWarshall(graph, dist_seq);
@@ -87,7 +121,7 @@ int main() {
     for (int num_threads : thread_counts) {
         omp_set_num_threads(num_threads); // Set số lượng threads
 
-        // Kiểm tra số lượng threads thực tế (sử dụng một parallel region nhỏ riêng biệt, không nằm trong thời gian đo)
+        // Kiểm tra số lượng threads thực tế (sử dụng một parallel region nhỏ riêng biệt)
         int actual_threads = 0;
         #pragma omp parallel
         {
@@ -96,32 +130,48 @@ int main() {
                 actual_threads = omp_get_num_threads();
             }
         }
-        cout << "[INFO] Dang chay Floyd-Warshall song song voi " << num_threads << " threads..." << endl;
-        cout << "[INFO] So luong threads thuc te: " << actual_threads << endl;
 
-        // Chạy Floyd-Warshall song song
-        vector<vector<int>> dist_par;
-        auto start_par = chrono::high_resolution_clock::now();
-        parallel_floydWarshall(graph, dist_par);
-        auto end_par = chrono::high_resolution_clock::now();
-        auto duration_par = chrono::duration_cast<chrono::milliseconds>(end_par - start_par).count();
-        cout << "[INFO] Thoi gian hoan thanh (song song voi " << num_threads << " threads): " << duration_par << " ms" << endl;
+        // Chạy Cach 1
+        vector<vector<int>> dist_par_1;
+        auto start_par_1 = chrono::high_resolution_clock::now();
+        parallel_floydWarshall_1(graph, dist_par_1);
+        auto end_par_1 = chrono::high_resolution_clock::now();
+        auto duration_par_1 = chrono::duration_cast<chrono::milliseconds>(end_par_1 - start_par_1).count();
+        cout << "[INFO] Thoi gian hoan thanh (Cach 1 voi " << actual_threads << " threads): " << duration_par_1 << " ms" << endl;
 
-        // Kiểm tra tính đúng đắn (so sánh một vài giá trị ngẫu nhiên giữa dist_seq và dist_par) - chỉ kiểm tra cho mỗi chạy
-        bool correct = true;
+        // Kiểm tra tính đúng đắn cho Cach 1
+        bool correct_1 = true;
         uniform_int_distribution<> idx_dis(0, V-1);
         for (int check = 0; check < V/10; ++check) { // Kiểm tra V/10 cặp ngẫu nhiên
             int i = idx_dis(gen);
             int j = idx_dis(gen);
-            if (dist_seq[i][j] != dist_par[i][j]) {
-                correct = false;
+            if (dist_seq[i][j] != dist_par_1[i][j]) {
+                correct_1 = false;
                 break;
             }
         }
-        cout << "[INFO] Ket qua song song trung khop voi tuan tu: " << (correct ? "True" : "False") << "\n" << endl;
-    }
+        cout << "[INFO] Ket qua trung khop voi tuan tu: " << (correct_1 ? "True" : "False") << "\n" << endl;
 
-    // Lưu ý: Không in toàn bộ ma trận vì quá lớn; nếu cần, có thể in một phần nhỏ
+        // Chạy Cach 2
+        vector<vector<int>> dist_par_2;
+        auto start_par_2 = chrono::high_resolution_clock::now();
+        parallel_floydWarshall_2(graph, dist_par_2);
+        auto end_par_2 = chrono::high_resolution_clock::now();
+        auto duration_par_2 = chrono::duration_cast<chrono::milliseconds>(end_par_2 - start_par_2).count();
+        cout << "[INFO] Thoi gian hoan thanh (Cach 2 voi " << actual_threads << " threads): " << duration_par_2 << " ms" << endl;
+
+        // Kiểm tra tính đúng đắn cho Cach 2
+        bool correct_2 = true;
+        for (int check = 0; check < 50; ++check) { // Kiểm tra 50 cặp ngẫu nhiên
+            int i = idx_dis(gen);
+            int j = idx_dis(gen);
+            if (dist_seq[i][j] != dist_par_2[i][j]) {
+                correct_2 = false;
+                break;
+            }
+        }
+        cout << "[INFO] Ket qua trung khop voi tuan tu: " << (correct_2 ? "True" : "False") << "\n" << endl;
+    }
 
     return 0;
 }
