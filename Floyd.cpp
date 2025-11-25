@@ -19,7 +19,7 @@ void floydWarshall(const vector<vector<int>>& graph, vector<vector<int>>& dist) 
     for (int k = 0; k < V; ++k) {
         for (int i = 0; i < V; ++i) {
             for (int j = 0; j < V; ++j) {
-                if (dist[i][k] != INF && dist[k][j] != INF && 
+                if (dist[i][k] != INF && dist[k][j] != INF &&
                     (long long)dist[i][k] + dist[k][j] < dist[i][j]) {
                     dist[i][j] = dist[i][k] + dist[k][j];
                 }
@@ -43,7 +43,6 @@ void parallel_floydWarshall_1(const vector<vector<int>>& graph, vector<vector<in
 
         #pragma omp parallel for
         for (int i = 0; i < V; ++i) {
-            // đọc col_k[i] là giá trị dist[i][k] sau bước k-1
             int dik = col_k[i];
             if (dik == INF) continue; // Không có đường i -> k thì bỏ qua cả hàng
 
@@ -70,13 +69,95 @@ void parallel_floydWarshall_2(const vector<vector<int>>& graph, vector<vector<in
         #pragma omp parallel for collapse(2)
         for (int i = 0; i < V; ++i) {
             for (int j = 0; j < V; ++j) {
-                if (dist[i][k] != INF && dist[k][j] != INF && 
+                if (dist[i][k] != INF && dist[k][j] != INF &&
                     (long long)dist[i][k] + dist[k][j] < dist[i][j]) {
                     dist[i][j] = dist[i][k] + dist[k][j];
                 }
             }
         }
     }
+}
+
+// Chạy phương pháp 1: đặt số threads, chạy parallel_floydWarshall_1, đo thời gian (ms) và kiểm tra so với dist_seq.
+// Trả về thời gian chạy (ms). In thông tin ra stdout.
+long long run_method1(const vector<vector<int>>& graph, int num_threads,
+                      const vector<vector<int>>& dist_seq, std::mt19937 &gen) {
+    omp_set_num_threads(num_threads);
+
+    // Kiểm tra số lượng threads thực tế (không nằm trong đo thời gian)
+    int actual_threads = 0;
+    #pragma omp parallel
+    {
+        #pragma omp single
+        {
+            actual_threads = omp_get_num_threads();
+        }
+    }
+
+    vector<vector<int>> dist_par;
+    auto start = chrono::high_resolution_clock::now();
+    parallel_floydWarshall_1(graph, dist_par);
+    auto end = chrono::high_resolution_clock::now();
+    auto duration_ms = chrono::duration_cast<chrono::milliseconds>(end - start).count();
+
+    // Kiểm tra tính đúng đắn so sánh ngẫu nhiên
+    bool correct = true;
+    uniform_int_distribution<> idx_dis(0, (int)graph.size() - 1);
+    int checks = max(1, (int)graph.size() / 10);
+    for (int t = 0; t < checks; ++t) {
+        int i = idx_dis(gen), j = idx_dis(gen);
+        if (dist_seq[i][j] != dist_par[i][j]) {
+            correct = false;
+            break;
+        }
+    }
+    cout << "[INFO] Floyd-Warshall song song (Cach 1) voi " << num_threads
+         << " threads (thuc te: " << actual_threads << "): " << (correct ? "Ket qua giong" : "Ket qua khac") << endl;
+    cout << "[INFO] Thoi gian hoan thanh: " << duration_ms << " ms; " << endl;
+
+    return duration_ms;
+}
+
+// Chạy phương pháp 2: đặt số threads, chạy parallel_floydWarshall_2, đo thời gian (ms) và kiểm tra so với dist_seq.
+// Trả về thời gian chạy (ms). In thông tin ra stdout.
+long long run_method2(const vector<vector<int>>& graph, int num_threads,
+                      const vector<vector<int>>& dist_seq, std::mt19937 &gen) {
+    omp_set_num_threads(num_threads);
+
+    // Kiểm tra số lượng threads thực tế (không nằm trong đo thời gian)
+    int actual_threads = 0;
+    #pragma omp parallel
+    {
+        #pragma omp single
+        {
+            actual_threads = omp_get_num_threads();
+        }
+    }
+
+    vector<vector<int>> dist_par;
+    auto start = chrono::high_resolution_clock::now();
+    parallel_floydWarshall_2(graph, dist_par);
+    auto end = chrono::high_resolution_clock::now();
+    auto duration_ms = chrono::duration_cast<chrono::milliseconds>(end - start).count();
+
+    // Kiểm tra tính đúng đắn so sánh ngẫu nhiên
+    bool correct = true;
+    uniform_int_distribution<> idx_dis(0, (int)graph.size() - 1);
+    int checks = 50;
+    for (int t = 0; t < checks; ++t) {
+        int i = idx_dis(gen), j = idx_dis(gen);
+        if (dist_seq[i][j] != dist_par[i][j]) {
+            correct = false;
+            break;
+        }
+    }
+
+    cout << "[INFO] Floyd-Warshall song song (Cach 2) voi " << num_threads
+         << " threads (thuc te: " << actual_threads << "): " << (correct ? "Ket qua giong" : "Ket qua khac") << endl;
+    cout << "[INFO] Thoi gian hoan thanh: " << duration_ms << " ms; "
+         << "\n" << endl;
+
+    return duration_ms;
 }
 
 int main() {
@@ -108,6 +189,7 @@ int main() {
     }
 
     // Chạy Floyd-Warshall tuần tự
+    cout << "[INFO] Dang chay Floyd-Warshall tuan tu..." << endl;
     vector<vector<int>> dist_seq;
     auto start_seq = chrono::high_resolution_clock::now();
     floydWarshall(graph, dist_seq);
@@ -119,58 +201,9 @@ int main() {
     vector<int> thread_counts = {4, 8, 12};
 
     for (int num_threads : thread_counts) {
-        omp_set_num_threads(num_threads); // Set số lượng threads
-
-        // Kiểm tra số lượng threads thực tế (sử dụng một parallel region nhỏ riêng biệt)
-        int actual_threads = 0;
-        #pragma omp parallel
-        {
-            #pragma omp single
-            {
-                actual_threads = omp_get_num_threads();
-            }
-        }
-
-        // Chạy Cach 1
-        vector<vector<int>> dist_par_1;
-        auto start_par_1 = chrono::high_resolution_clock::now();
-        parallel_floydWarshall_1(graph, dist_par_1);
-        auto end_par_1 = chrono::high_resolution_clock::now();
-        auto duration_par_1 = chrono::duration_cast<chrono::milliseconds>(end_par_1 - start_par_1).count();
-        cout << "[INFO] Thoi gian hoan thanh (Cach 1 voi " << actual_threads << " threads): " << duration_par_1 << " ms" << endl;
-
-        // Kiểm tra tính đúng đắn cho Cach 1
-        bool correct_1 = true;
-        uniform_int_distribution<> idx_dis(0, V-1);
-        for (int check = 0; check < V/10; ++check) { // Kiểm tra V/10 cặp ngẫu nhiên
-            int i = idx_dis(gen);
-            int j = idx_dis(gen);
-            if (dist_seq[i][j] != dist_par_1[i][j]) {
-                correct_1 = false;
-                break;
-            }
-        }
-        cout << "[INFO] Ket qua trung khop voi tuan tu: " << (correct_1 ? "True" : "False") << "\n" << endl;
-
-        // Chạy Cach 2
-        vector<vector<int>> dist_par_2;
-        auto start_par_2 = chrono::high_resolution_clock::now();
-        parallel_floydWarshall_2(graph, dist_par_2);
-        auto end_par_2 = chrono::high_resolution_clock::now();
-        auto duration_par_2 = chrono::duration_cast<chrono::milliseconds>(end_par_2 - start_par_2).count();
-        cout << "[INFO] Thoi gian hoan thanh (Cach 2 voi " << actual_threads << " threads): " << duration_par_2 << " ms" << endl;
-
-        // Kiểm tra tính đúng đắn cho Cach 2
-        bool correct_2 = true;
-        for (int check = 0; check < 50; ++check) { // Kiểm tra 50 cặp ngẫu nhiên
-            int i = idx_dis(gen);
-            int j = idx_dis(gen);
-            if (dist_seq[i][j] != dist_par_2[i][j]) {
-                correct_2 = false;
-                break;
-            }
-        }
-        cout << "[INFO] Ket qua trung khop voi tuan tu: " << (correct_2 ? "True" : "False") << "\n" << endl;
+        // Gọi hàm chạy cho cách 1 và cách 2
+        run_method1(graph, num_threads, dist_seq, gen);
+        run_method2(graph, num_threads, dist_seq, gen);
     }
 
     return 0;
