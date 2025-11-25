@@ -1,9 +1,10 @@
 #include <iostream>
 #include <vector>
 #include <omp.h>
-#include <iomanip> // Để sử dụng setprecision
+#include <iomanip> // Để sử dụng setprecision (nếu cần, nhưng giờ dùng chrono)
 #include <random>  // Để tạo đầu vào ngẫu nhiên
 #include <limits.h> // Để sử dụng INT_MAX
+#include <chrono>  // Để tính thời gian bằng chrono
 
 #define INF INT_MAX
 
@@ -47,9 +48,12 @@ void parallel_floydWarshall(const vector<vector<int>>& graph, vector<vector<int>
 }
 
 int main() {
-    // Tạo đầu vào ngẫu nhiên đủ lớn: Ma trận VxV với V=1000 (O(V^3) ≈ 10^9 operations, đủ để thấy sự khác biệt thời gian)
-    // Đồ thị sparse (xác suất có cạnh ~0.1), trọng số ngẫu nhiên từ 1 đến 100 (dương để tránh negative cycles)
-    const int V = 1000;
+    // Người dùng nhập kích thước ma trận V
+    int V;
+    cout << "Nhap kich thuoc ma tran V (vi du: 1000): ";
+    cin >> V;
+
+    // Tạo đầu vào ngẫu nhiên: Ma trận VxV, đồ thị sparse (xác suất có cạnh ~0.1), trọng số ngẫu nhiên từ 1 đến 100
     vector<vector<int>> graph(V, vector<int>(V, INF));
 
     random_device rd;
@@ -69,47 +73,53 @@ int main() {
     }
 
     // Chạy Floyd-Warshall tuần tự
+    cout << "[INFO] Dang chay Floyd-Warshall tuan tu..." << endl;
     vector<vector<int>> dist_seq;
-    double start_seq = omp_get_wtime();
+    auto start_seq = chrono::high_resolution_clock::now();
     floydWarshall(graph, dist_seq);
-    double end_seq = omp_get_wtime();
-    double time_seq = end_seq - start_seq;
+    auto end_seq = chrono::high_resolution_clock::now();
+    auto duration_seq = chrono::duration_cast<chrono::milliseconds>(end_seq - start_seq).count();
+    cout << "[INFO] Thoi gian hoan thanh (tuan tu): " << duration_seq << " ms\n" << endl;
 
-    cout << fixed << setprecision(4); // Hiển thị thời gian với 4 chữ số thập phân
-    cout << "Thoi gian hoan thanh (tuan tu): " << time_seq << " giay" << endl;
+    // Cấu hình và chạy song song với số lượng threads khác nhau: 4, 8, 12
+    vector<int> thread_counts = {4, 8, 12};
 
-    // Chạy Floyd-Warshall song song
-    vector<vector<int>> dist_par;
-    double start_par = omp_get_wtime();
-    parallel_floydWarshall(graph, dist_par);
-    double end_par = omp_get_wtime();
-    double time_par = end_par - start_par;
+    for (int num_threads : thread_counts) {
+        omp_set_num_threads(num_threads); // Set số lượng threads
 
-    cout << "Thoi gian hoan thanh (song song): " << time_par << " giay" << endl;
-
-    // Kiểm tra số lượng threads cho song song (sử dụng một parallel region nhỏ riêng biệt, không nằm trong thời gian đo)
-    int num_threads = 0;
-    #pragma omp parallel
-    {
-        #pragma omp single
+        // Kiểm tra số lượng threads thực tế (sử dụng một parallel region nhỏ riêng biệt, không nằm trong thời gian đo)
+        int actual_threads = 0;
+        #pragma omp parallel
         {
-            num_threads = omp_get_num_threads();
+            #pragma omp single
+            {
+                actual_threads = omp_get_num_threads();
+            }
         }
-    }
-    cout << "So luong threads dang su dung cho song song: " << num_threads << endl;
+        cout << "[INFO] Dang chay Floyd-Warshall song song voi " << num_threads << " threads..." << endl;
+        cout << "[INFO] So luong threads thuc te: " << actual_threads << endl;
 
-    // Kiểm tra tính đúng đắn (so sánh một vài giá trị ngẫu nhiên giữa dist_seq và dist_par)
-    bool correct = true;
-    uniform_int_distribution<> idx_dis(0, V-1);
-    for (int check = 0; check < 10; ++check) { // Kiểm tra 10 cặp ngẫu nhiên
-        int i = idx_dis(gen);
-        int j = idx_dis(gen);
-        if (dist_seq[i][j] != dist_par[i][j]) {
-            correct = false;
-            break;
+        // Chạy Floyd-Warshall song song
+        vector<vector<int>> dist_par;
+        auto start_par = chrono::high_resolution_clock::now();
+        parallel_floydWarshall(graph, dist_par);
+        auto end_par = chrono::high_resolution_clock::now();
+        auto duration_par = chrono::duration_cast<chrono::milliseconds>(end_par - start_par).count();
+        cout << "[INFO] Thoi gian hoan thanh (song song voi " << num_threads << " threads): " << duration_par << " ms" << endl;
+
+        // Kiểm tra tính đúng đắn (so sánh một vài giá trị ngẫu nhiên giữa dist_seq và dist_par) - chỉ kiểm tra cho mỗi chạy
+        bool correct = true;
+        uniform_int_distribution<> idx_dis(0, V-1);
+        for (int check = 0; check < V/10; ++check) { // Kiểm tra V/10 cặp ngẫu nhiên
+            int i = idx_dis(gen);
+            int j = idx_dis(gen);
+            if (dist_seq[i][j] != dist_par[i][j]) {
+                correct = false;
+                break;
+            }
         }
+        cout << "[INFO] Ket qua song song trung khop voi tuan tu: " << (correct ? "True" : "False") << "\n" << endl;
     }
-    cout << "Ket qua song song trung khop voi tuan tu (kiem tra ngau nhien): " << (correct ? "Yes" : "No") << endl;
 
     // Lưu ý: Không in toàn bộ ma trận vì quá lớn; nếu cần, có thể in một phần nhỏ
 
